@@ -4,9 +4,9 @@ import json
 import os
 import re
 import requests
-from datetime import datetime
+import hashlib # Untuk simulasi keamanan password sederhana
 
-# --- KONFIGURASI HALAMAN (RAMAH SISWA) ---
+# --- KONFIGURASI HALAMAN ---
 st.set_page_config(
     page_title="Sobat Pustaka - Smart School Library",
     page_icon="🎓",
@@ -15,277 +15,261 @@ st.set_page_config(
 )
 
 # --- FILE PENYIMPANAN DATA ---
-DB_FILE = 'school_library_data.json'
+BOOK_DB_FILE = 'school_library_data.json'
+USER_DB_FILE = 'users.json'
 
-# --- DATA AWAL (KOLEKSI PERPUSTAKAAN SEKOLAH) ---
-# Disesuaikan untuk Siswa SD/SMP/SMA
-DEFAULT_DATA = [
+# --- 1. MANAJEMEN DATA BUKU ---
+DEFAULT_BOOKS = [
     {"judul": "Laskar Pelangi", "penulis": "Andrea Hirata", "tags": "motivasi, sekolah, perjuangan, mimpi", "kategori": "Fiksi", "rak": "A-01", "p5": "Mandiri"},
-    {"judul": "Dunia Sophie (Filsafat untuk Remaja)", "penulis": "Jostein Gaarder", "tags": "misteri, berpikir, sejarah, logika", "kategori": "Novel Edukasi", "rak": "B-03", "p5": "Bernalar Kritis"},
-    {"judul": "Ensiklopedia Sains: Alam Semesta", "penulis": "Tim National Geographic", "tags": "sains, antariksa, ipa, fakta", "kategori": "Ensiklopedia", "rak": "C-12", "p5": "Bernalar Kritis"},
-    {"judul": "Cara Jago Coding Tanpa Pusing", "penulis": "Budi Raharjo", "tags": "komputer, coding, game, teknologi", "kategori": "Keterampilan", "rak": "D-05", "p5": "Kreatif"},
-    {"judul": "Laut Bercerita", "penulis": "Leila S. Chudori", "tags": "sejarah, persahabatan, sosial, sedih", "kategori": "Fiksi Sejarah", "rak": "A-02", "p5": "Berkebinekaan Global"},
-    {"judul": "Atomic Habits (Versi Remaja)", "penulis": "James Clear", "tags": "psikologi, kebiasaan, disiplin, mental", "kategori": "Pengembangan Diri", "rak": "E-01", "p5": "Mandiri"},
+    {"judul": "Dunia Sophie", "penulis": "Jostein Gaarder", "tags": "misteri, berpikir, sejarah, logika", "kategori": "Novel Edukasi", "rak": "B-03", "p5": "Bernalar Kritis"},
+    {"judul": "Ensiklopedia Sains", "penulis": "Tim NatGeo", "tags": "sains, antariksa, ipa, fakta", "kategori": "Ensiklopedia", "rak": "C-12", "p5": "Bernalar Kritis"},
+    {"judul": "Atomic Habits (Remaja)", "penulis": "James Clear", "tags": "psikologi, kebiasaan, disiplin", "kategori": "Pengembangan Diri", "rak": "E-01", "p5": "Mandiri"},
 ]
 
-# --- FUNGSI MANAJEMEN DATA ---
 @st.cache_data
-def load_data():
-    if not os.path.exists(DB_FILE):
-        with open(DB_FILE, 'w') as f:
-            json.dump(DEFAULT_DATA, f)
-        return pd.DataFrame(DEFAULT_DATA)
+def load_books():
+    if not os.path.exists(BOOK_DB_FILE):
+        with open(BOOK_DB_FILE, 'w') as f:
+            json.dump(DEFAULT_BOOKS, f)
+        return pd.DataFrame(DEFAULT_BOOKS)
     try:
-        with open(DB_FILE, 'r') as f:
+        with open(BOOK_DB_FILE, 'r') as f:
             data = json.load(f)
         return pd.DataFrame(data)
     except:
-        return pd.DataFrame(DEFAULT_DATA)
+        return pd.DataFrame(DEFAULT_BOOKS)
 
-def save_data(df):
-    data_list = df.to_dict('records')
-    with open(DB_FILE, 'w') as f:
-        json.dump(data_list, f)
-    st.cache_data.clear()
-
-# --- FUNGSI PENCARIAN INTERNET (SUMBER BELAJAR) ---
-@st.cache_data(show_spinner=False)
-def search_learning_resources(keywords):
-    """
-    Mencari sumber belajar dari Crossref, disesuaikan agar relevan dengan kebutuhan sekolah.
-    """
-    results = []
+# --- 2. MANAJEMEN USER (LOGIN/REGISTER) ---
+def load_users():
+    if not os.path.exists(USER_DB_FILE):
+        return []
     try:
-        # Kita filter tipe konten agar lebih relevan (book-chapter, reference-entry, article)
-        url = f"https://api.crossref.org/works?query={keywords}&rows=3&select=title,author,type,container-title,URL"
-        response = requests.get(url, timeout=3)
-        
-        if response.status_code == 200:
-            data = response.json()
-            items = data.get('message', {}).get('items', [])
-            
-            for item in items:
-                judul = item.get('title', ['No Title'])[0]
-                
-                penulis = "Tim Penulis"
-                if 'author' in item and len(item['author']) > 0:
-                    fam = item['author'][0].get('family', '')
-                    given = item['author'][0].get('given', '')
-                    penulis = f"{given} {fam}".strip()
-                
-                sumber = item.get('container-title', ['Jurnal/Database Global'])[0]
-                link = item.get('URL', '#')
-                
-                results.append({
-                    "judul": judul,
-                    "penulis": penulis,
-                    "kategori": "Sumber Digital (Global)",
-                    "rak": "Internet",
-                    "p5": "Bernalar Kritis",
-                    "link": link
-                })
+        with open(USER_DB_FILE, 'r') as f:
+            return json.load(f)
     except:
-        pass
-    return results
+        return []
 
-# --- LOGIKA PRIVASI (PRIVACY SHIELD - SCHOOL EDITION) ---
+def save_user(new_user):
+    users = load_users()
+    users.append(new_user)
+    with open(USER_DB_FILE, 'w') as f:
+        json.dump(users, f)
+
+def check_login(username, password):
+    users = load_users()
+    hashed_pw = hashlib.sha256(password.encode()).hexdigest()
+    for user in users:
+        if user['username'] == username and user['password'] == hashed_pw:
+            return user
+    return None
+
+def check_user_exists(username):
+    users = load_users()
+    for user in users:
+        if user['username'] == username:
+            return True
+    return False
+
+# --- 3. FITUR INTI (AI & PENCARIAN) ---
 def privacy_shield_check(text):
     warnings = []
     score = 100
-    
-    # 1. Deteksi Data Pribadi (Bahasa Edukatif)
     if re.search(r'[\w\.-]+@[\w\.-]+', text):
-        warnings.append("🛡️ **Ups, ada Email!** Sebaiknya jangan posting alamat email sembarangan ya.")
+        warnings.append("🛡️ **Ups, ada Email!** Jangan posting email sembarangan ya.")
         score -= 20
     if re.search(r'(\+62|08)\d{8,}', text):
-        warnings.append("🛡️ **Bahaya:** Ada nomor HP/WA terdeteksi. Jangan disebar ya, nanti banyak spam/penipuan.")
+        warnings.append("🛡️ **Bahaya:** Ada nomor HP terdeteksi. Jangan disebar.")
         score -= 30
-    if re.search(r'(Jl\.|Jalan|Rumah|Komplek)\s\w+', text, re.IGNORECASE):
-        warnings.append("🛡️ **Jaga Privasi:** Jangan tulis alamat rumah detail di internet.")
-        score -= 20
-        
-    # 2. Deteksi Cyberbullying/Toxic (Bahasa Sekolah)
-    toxic_words = ['bodoh', 'tolol', 'jelek', 'mati', 'benci', 'sampah', 'gila']
+    toxic_words = ['bodoh', 'tolol', 'jelek', 'mati', 'benci']
     found_toxic = [word for word in toxic_words if word in text.lower()]
     if found_toxic:
-        warnings.append(f"🤝 **Etika Digital:** Yuk ganti kata **'{', '.join(found_toxic)}'** dengan kata yang lebih baik. Jadilah netizen bijak!")
+        warnings.append(f"🤝 **Etika:** Yuk ganti kata kasar **'{', '.join(found_toxic)}** dengan yang lebih sopan.")
         score -= 25
-
-    # 3. Analisis Sentimen Sederhana (Deteksi Kecemasan/Curhat)
-    anxiety_words = ['takut', 'cemas', 'bingung', 'sedih', 'stres', 'capek']
+    anxiety_words = ['takut', 'cemas', 'bingung', 'sedih']
     found_anxiety = [word for word in anxiety_words if word in text.lower()]
-    
     return score, warnings, found_anxiety
 
-def get_recommendations(text, df_local, use_internet=False):
+def get_recommendations(text, df_local, user_interest=None):
     text_lower = text.lower()
     local_results = []
     
-    # Pencarian Lokal (Matching Minat)
     for index, row in df_local.iterrows():
         tags = [t.strip().lower() for t in row['tags'].split(',')]
-        # Cek relevansi tag
         relevance = sum(1 for tag in tags if tag in text_lower)
         
-        # Logika tambahan: Jika user curhat (deteksi kata sedih/takut), sarankan buku motivasi
-        if any(x in text_lower for x in ['sedih', 'takut', 'galau']) and row['kategori'] == 'Pengembangan Diri':
-            relevance += 2
-            
+        # --- ALGORITMA PERSONALISASI (Hanya untuk User Login) ---
+        # Jika user punya minat (misal: 'sains') dan buku ini sesuai, tambah poin relevansi
+        if user_interest:
+            interest_list = [i.strip().lower() for i in user_interest.split(',')]
+            for interest in interest_list:
+                if interest in row['tags'].lower() or interest in row['kategori'].lower():
+                    relevance += 2 # Boost skor rekomendasi
+        
         if relevance > 0:
+            row['score'] = relevance # Simpan skor untuk sorting
             local_results.append(row)
     
-    # Pencarian Internet
-    internet_results = []
-    if use_internet:
-        words = sorted(text.split(), key=len, reverse=True)[:3]
-        query = " ".join(words)
-        if len(query) > 3:
-            internet_results = search_learning_resources(query)
-    
-    return local_results + internet_results
+    # Sort hasil berdasarkan relevansi tertinggi
+    local_results = sorted(local_results, key=lambda x: x['score'], reverse=True)
+    return local_results
 
-# --- HALAMAN USER (SISWA) ---
-def student_page():
-    st.markdown("## 🎓 Sobat Pustaka")
-    st.markdown("##### *Teman Cerita & Belajar Kamu yang Aman*")
+# --- 4. HALAMAN AUTHENTICATION (LOGIN/SIGNUP) ---
+def auth_page():
+    st.markdown("<h1 style='text-align: center;'>🎓 Sobat Pustaka</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Portal Literasi Digital & Keamanan Siswa</p>", unsafe_allow_html=True)
     
-    # Layout Input
-    with st.container():
-        col1, col2 = st.columns([2, 1])
+    tab1, tab2, tab3 = st.tabs(["🔑 Masuk (Sign In)", "📝 Daftar (Sign Up)", "👀 Tamu (Guest)"])
+    
+    # --- TAB SIGN IN ---
+    with tab1:
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submit_login = st.form_submit_button("Masuk")
+            
+            if submit_login:
+                user = check_login(username, password)
+                if user:
+                    st.session_state['logged_in'] = True
+                    st.session_state['user'] = user
+                    st.session_state['role'] = 'student'
+                    st.success(f"Selamat datang kembali, {user['name']}!")
+                    st.rerun()
+                else:
+                    st.error("Username atau Password salah.")
+
+    # --- TAB SIGN UP ---
+    with tab2:
+        st.info("Belum punya akun? Isi data diri kamu di sini untuk mendapatkan rekomendasi buku yang lebih personal!")
+        with st.form("signup_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                new_name = st.text_input("Nama Lengkap")
+                new_user = st.text_input("Buat Username")
+                new_pass = st.text_input("Buat Password", type="password")
+            with col2:
+                new_grade = st.selectbox("Kelas", ["7", "8", "9", "10", "11", "12"])
+                new_interest = st.text_input("Minat/Hobi (Penting untuk Algoritma!)", placeholder="Contoh: Sains, Sejarah, Coding")
+            
+            submit_reg = st.form_submit_button("Daftar Sekarang")
+            
+            if submit_reg:
+                if new_name and new_user and new_pass:
+                    if check_user_exists(new_user):
+                        st.warning("Username sudah dipakai, cari yang lain ya.")
+                    else:
+                        hashed_pw = hashlib.sha256(new_pass.encode()).hexdigest()
+                        user_data = {
+                            "name": new_name,
+                            "username": new_user,
+                            "password": hashed_pw,
+                            "grade": new_grade,
+                            "interest": new_interest
+                        }
+                        save_user(user_data)
+                        st.success("Akun berhasil dibuat! Silakan login di tab sebelah.")
+                else:
+                    st.warning("Mohon lengkapi semua data.")
+
+    # --- TAB GUEST ---
+    with tab3:
+        st.write("Masuk sebagai tamu? Kamu tetap bisa cari buku dan cek keamanan tulisan, tapi **rekomendasi tidak akan disesuaikan dengan minatmu**.")
+        if st.button("Masuk sebagai Tamu 🚀"):
+            st.session_state['logged_in'] = True
+            st.session_state['user'] = {"name": "Tamu", "interest": None} # Interest None = Tidak ada personalisasi
+            st.session_state['role'] = 'guest'
+            st.rerun()
+
+# --- 5. HALAMAN UTAMA (DASHBOARD) ---
+def main_app():
+    user = st.session_state['user']
+    role = st.session_state['role']
+    
+    # --- SIDEBAR (PROFIL) ---
+    with st.sidebar:
+        if role == 'guest':
+            st.image("https://cdn-icons-png.flaticon.com/512/847/847969.png", width=80)
+            st.title("Mode Tamu")
+            st.info("⚠ Fitur Personalisasi Nonaktif")
+            st.write("Silakan Login untuk menyimpan riwayat dan mendapat rekomendasi sesuai hobi.")
+        else:
+            st.image("https://cdn-icons-png.flaticon.com/512/1999/1999625.png", width=80)
+            st.title(f"Halo, {user['name']}")
+            st.caption(f"Kelas {user['grade']}")
+            st.markdown("---")
+            st.write("**Minat Terdaftar:**")
+            st.success(f"🎯 {user['interest']}")
+            st.caption("*Algoritma AI akan memprioritaskan buku sesuai minat di atas.*")
         
-        with col1:
-            st.info("💡 **Tips:** Bingung mau nulis caption IG/TikTok? Atau lagi cari bahan tugas? Tulis aja di sini, AI akan bantuin kamu cek keamanannya & cari buku yang pas!")
-            
-            input_text = st.text_area(
-                "Apa yang lagi kamu pikirkan/kerjakan?", 
-                height=120, 
-                placeholder="Contoh: Aku lagi suka banget main game tapi takut nilai turun. Ada saran buku gak?"
-            )
-            
-            col_act1, col_act2 = st.columns(2)
-            with col_act1:
-                use_internet = st.checkbox("🌍 Cari info tambahan dari internet", value=True)
-            with col_act2:
-                analyze = st.button("✨ Cek Tulisan & Cari Buku", use_container_width=True, type="primary")
+        st.markdown("---")
+        if st.button("Keluar / Log Out"):
+            st.session_state.clear()
+            st.rerun()
 
-        with col2:
-            st.image("https://img.freepik.com/free-vector/flat-design-library-concept_23-2149117865.jpg?w=740", caption="Perpustakaan Digital Sekolah")
+    # --- KONTEN UTAMA ---
+    st.markdown(f"## 📚 Perpustakaan Digital (User: {user['name']})")
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.write("Apa yang sedang kamu pikirkan? (Tugas, Curhat, Caption Medsos)")
+        input_text = st.text_area("Ketik di sini...", height=100)
+        analyze = st.button("🔍 Analisis & Cari Referensi", type="primary")
 
-    st.divider()
+    with col2:
+        if role == 'guest':
+            st.warning("💡 **Tips Tamu:** Hasil pencarianmu bersifat umum. Login untuk hasil yang lebih spesifik!")
+        else:
+            st.info(f"💡 **AI Personal:** Sistem akan mencari buku yang berhubungan dengan teks kamu DAN hobimu ({user['interest']}).")
 
     if analyze and input_text:
-        df = load_data()
+        df = load_books()
         
-        # Proses Cepat
-        with st.status("🤖 AI sedang bekerja...", expanded=True) as status:
-            st.write("🛡️ Memeriksa keamanan privasi...")
-            score, warnings, anxiety = privacy_shield_check(input_text)
-            
-            st.write("📚 Mengubungkan minatmu dengan buku di rak...")
-            recs = get_recommendations(input_text, df, use_internet)
-            
-            status.update(label="Selesai!", state="complete", expanded=False)
+        # Privacy Check
+        score, warnings, anxiety = privacy_shield_check(input_text)
+        
+        # Recommendation Logic
+        # Jika Guest, user['interest'] adalah None, jadi algoritma personalisasi mati.
+        recs = get_recommendations(input_text, df, user_interest=user.get('interest'))
 
-        col_res1, col_res2 = st.columns([1, 1])
-
-        # BAGIAN 1: PRIVACY SHIELD (EDUKASI)
-        with col_res1:
-            st.subheader("🛡️ Hasil Cek Keamanan")
-            
-            # Tampilan Skor ala Game
+        # TAMPILAN HASIL
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            st.subheader("🛡️ Keamanan & Etika")
             if score >= 90:
-                st.success(f"**Skor Keamanan: {score}/100 (SANGAT BAGUS)**")
-                st.markdown("✅ Tulisan kamu aman! Siap diposting tanpa takut data bocor.")
-            elif score >= 60:
-                st.warning(f"**Skor Keamanan: {score}/100 (HATI-HATI)**")
-                st.markdown("🤔 Hmm, ada beberapa hal yang perlu kamu perbaiki:")
-                for w in warnings:
-                    st.write(w)
+                st.success(f"Skor: {score} (Aman)")
             else:
-                st.error(f"**Skor Keamanan: {score}/100 (BERISIKO)**")
-                st.markdown("⛔ **Stop!** Jangan diposting dulu. Ini berbahaya buat kamu:")
-                for w in warnings:
-                    st.write(w)
+                st.warning(f"Skor: {score} (Perlu Perbaikan)")
+                for w in warnings: st.write(w)
             
-            # Respon Empati (Jika terdeteksi cemas)
             if anxiety:
-                st.info(f"💙 Sepertinya kamu lagi merasa **{', '.join(anxiety)}**. Gapapa kok merasa begitu. Coba baca buku rekomendasi di samping buat nemenin kamu ya.")
+                st.info(f"Terdeteksi perasaan: {', '.join(anxiety)}. Semangat ya! Buku di samping mungkin bisa nemenin kamu.")
 
-        # BAGIAN 2: REKOMENDASI BUKU (KURASI)
-        with col_res2:
-            st.subheader("📚 Rekomendasi Buat Kamu")
+        with c2:
+            st.subheader("📖 Rekomendasi Buku")
             if recs:
-                st.write(f"Ada **{len(recs)}** bahan bacaan yang cocok sama cerita kamu:")
                 for item in recs:
-                    with st.expander(f"📖 {item['judul']}"):
+                    # Menandai jika buku ini direkomendasikan karena minat user
+                    is_personalized = False
+                    if role != 'guest' and user['interest']:
+                        user_interests = [i.strip().lower() for i in user['interest'].split(',')]
+                        if any(i in item['tags'].lower() for i in user_interests):
+                            is_personalized = True
+                    
+                    with st.expander(f"{'⭐ ' if is_personalized else ''}{item['judul']}"):
                         st.write(f"**Penulis:** {item['penulis']}")
-                        st.write(f"**Kategori:** {item['kategori']}")
-                        
-                        # Badge P5
-                        if 'p5' in item:
-                            st.caption(f"🏅 **Dimensi P5:** {item['p5']}")
-                        
-                        if item['rak'] == "Internet":
-                            st.markdown(f"[Klik untuk baca sumber asli]({item.get('link', '#')})")
-                        else:
-                            st.markdown(f"📍 **Lokasi:** Rak {item['rak']} (Perpustakaan Sekolah)")
+                        st.write(f"**Rak:** {item['rak']}")
+                        if is_personalized:
+                            st.caption("✨ *Disarankan karena sesuai profil minatmu.*")
+                        st.caption(f"Tags: {item['tags']}")
             else:
-                st.warning("Belum nemu yang pas nih. Coba cerita lebih detail, misalnya tentang 'hobi', 'cita-cita', atau 'pelajaran kesukaan'.")
+                st.write("Belum ada buku yang cocok.")
 
-# --- HALAMAN ADMIN (PUSTAKAWAN) ---
-def librarian_page():
-    st.markdown("## 👩‍🏫 Dashboard Pustakawan")
-    st.info("Mode Admin: Kelola Koleksi Buku & Data Peminjaman")
-    
-    df = load_data()
-    tab1, tab2 = st.tabs(["📦 Katalog Buku", "➕ Tambah Buku Baru"])
-    
-    with tab1:
-        st.dataframe(df, use_container_width=True)
-        
-    with tab2:
-        with st.form("add_book_form"):
-            col_a, col_b = st.columns(2)
-            with col_a:
-                new_judul = st.text_input("Judul Buku")
-                new_penulis = st.text_input("Penulis")
-                new_rak = st.text_input("Lokasi Rak", placeholder="Contoh: A-01")
-            with col_b:
-                new_tags = st.text_input("Kata Kunci (Tags)", placeholder="hobi, pelajaran, emosi")
-                new_kategori = st.selectbox("Kategori", ["Fiksi", "Ensiklopedia", "Buku Paket", "Pengembangan Diri", "Komik Edukasi"])
-                new_p5 = st.selectbox("Dimensi P5", ["Beriman & Bertakwa", "Berkebinekaan Global", "Gotong Royong", "Mandiri", "Bernalar Kritis", "Kreatif"])
-            
-            submitted = st.form_submit_button("Simpan ke Database")
-            
-            if submitted:
-                new_data = {
-                    "judul": new_judul,
-                    "penulis": new_penulis,
-                    "tags": new_tags,
-                    "kategori": new_kategori,
-                    "rak": new_rak,
-                    "p5": new_p5
-                }
-                new_row = pd.DataFrame([new_data])
-                df = pd.concat([df, new_row], ignore_index=True)
-                save_data(df)
-                st.success("Buku berhasil ditambahkan!")
-                st.rerun()
+# --- MAIN FLOW CONTROL ---
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
 
-# --- NAVIGASI UTAMA ---
-def main():
-    st.sidebar.title("Navigasi Sekolah")
-    
-    # Menu Navigasi yang lebih sederhana
-    menu = st.sidebar.radio("Pilih Peran:", ["👦 Mode Siswa", "👩‍🏫 Mode Pustakawan"])
-    
-    st.sidebar.divider()
-    
-    if menu == "👦 Mode Siswa":
-        st.sidebar.info("**Profil Siswa**\n\nNama: Budi (Kelas 11)\nStatus: Aktif Membaca")
-        student_page()
-    else:
-        librarian_page()
-
-if __name__ == "__main__":
-    main()
+if not st.session_state['logged_in']:
+    auth_page()
+else:
+    main_app()
